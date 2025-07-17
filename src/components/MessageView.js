@@ -18,6 +18,9 @@ import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view
 import * as ImagePicker from 'expo-image-picker';
 import apiClient from '../services/apiClient';
 import Reactions from './Reactions';
+import LinkPreview from './LinkPreview';
+import ClickableText from './ClickableText';
+import { extractFirstUrl } from '../utils/linkUtils';
 
 const formatMessageTime = (timestamp) => {
   const date = new Date(timestamp);
@@ -54,6 +57,7 @@ function MessageView({ selectedThread, messages, onSendMessage, onBackPress, err
   const [uploading, setUploading] = useState(false);
   const [failedImages, setFailedImages] = useState(new Set());
   const [fullscreenImage, setFullscreenImage] = useState(null);
+  const [reactionPicker, setReactionPicker] = useState(null); // { messageGuid, position }
   const scrollViewRef = useRef(null);
 
   useEffect(() => {
@@ -161,6 +165,42 @@ function MessageView({ selectedThread, messages, onSendMessage, onBackPress, err
 
   const removeSelectedImage = () => {
     setSelectedImage(null);
+  };
+
+  const sendReaction = async (messageGuid, reactionType) => {
+    if (!selectedThread || !messageGuid) return;
+    
+    try {
+      const response = await fetch(`${apiClient.baseURL}/threads/${selectedThread.thread_guid}/reactions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message_guid: messageGuid,
+          reaction_type: reactionType
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Failed to send reaction: ${response.status}`);
+      }
+      
+      console.log('Reaction sent successfully');
+      setReactionPicker(null);
+      
+    } catch (error) {
+      console.error('Failed to send reaction:', error);
+      Alert.alert('Error', 'Failed to send reaction: ' + error.message);
+    }
+  };
+
+  const handleLongPress = (message, event) => {
+    const { pageX, pageY } = event.nativeEvent;
+    setReactionPicker({
+      messageGuid: message.guid,
+      position: { x: pageX, y: pageY }
+    });
   };
 
   const handleImageError = (imageUrl, attachIndex) => {
@@ -282,6 +322,7 @@ function MessageView({ selectedThread, messages, onSendMessage, onBackPress, err
                           onPress={() => {
                             setFullscreenImage(imageUrl);
                           }}
+                          onLongPress={(event) => handleLongPress(message, event)}
                         >
                           {renderImageOrFallback(imageUrl, attachIndex)}
                           <Text style={[
@@ -305,6 +346,7 @@ function MessageView({ selectedThread, messages, onSendMessage, onBackPress, err
                           onPress={() => {
                             setFullscreenImage(fallbackUrl);
                           }}
+                          onLongPress={(event) => handleLongPress(message, event)}
                         >
                           {renderImageOrFallback(fallbackUrl, `fallback-${attachIndex}`)}
                           <Text style={[
@@ -322,18 +364,24 @@ function MessageView({ selectedThread, messages, onSendMessage, onBackPress, err
               </View>
             ) : (
               // Render regular messages with bubble
-              <View style={[
-                styles.messageBubble,
-                isOutgoing ? styles.messageBubbleOutgoing : styles.messageBubbleIncoming,
-                hasReactions && styles.messageBubbleWithReactions
-              ]}>
+              <TouchableOpacity
+                style={[
+                  styles.messageBubble,
+                  isOutgoing ? styles.messageBubbleOutgoing : styles.messageBubbleIncoming,
+                  hasReactions && styles.messageBubbleWithReactions
+                ]}
+                onLongPress={(event) => handleLongPress(message, event)}
+                activeOpacity={0.9}
+              >
                 {message.text && (
-                  <Text style={[
-                    styles.messageText,
-                    isOutgoing && styles.messageTextOutgoing
-                  ]}>
-                    {message.text}
-                  </Text>
+                  <ClickableText
+                    text={message.text}
+                    style={[
+                      styles.messageText,
+                      isOutgoing && styles.messageTextOutgoing
+                    ]}
+                    isOutgoing={isOutgoing}
+                  />
                 )}
                 {message.attachments && message.attachments.length > 0 && (
                   <View style={styles.attachmentContainer}>
@@ -408,7 +456,15 @@ function MessageView({ selectedThread, messages, onSendMessage, onBackPress, err
                 ]}>
                   {formatMessageTime(message.timestamp)}
                 </Text>
-              </View>
+              </TouchableOpacity>
+            )}
+            
+            {/* Link Preview */}
+            {message.text && extractFirstUrl(message.text) && (
+              <LinkPreview 
+                url={extractFirstUrl(message.text)}
+                isOutgoing={isOutgoing}
+              />
             )}
             
             {hasReactions && (
@@ -423,6 +479,55 @@ function MessageView({ selectedThread, messages, onSendMessage, onBackPress, err
           </View>
         </View>
       </View>
+    );
+  };
+
+  const renderReactionPicker = () => {
+    if (!reactionPicker) return null;
+
+    const reactions = [
+      { type: 2000, emoji: '❤️', label: 'Love' },
+      { type: 2001, emoji: '👍', label: 'Like' },
+      { type: 2002, emoji: '👎', label: 'Dislike' },
+      { type: 2003, emoji: '😂', label: 'Laugh' },
+      { type: 2004, emoji: '😮', label: 'Surprise' },
+      { type: 2005, emoji: '😢', label: 'Sad' },
+      { type: 2006, emoji: '‼️', label: 'Emphasize' }
+    ];
+
+    return (
+      <Modal
+        visible={true}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setReactionPicker(null)}
+      >
+        <TouchableOpacity
+          style={styles.reactionPickerOverlay}
+          activeOpacity={1}
+          onPress={() => setReactionPicker(null)}
+        >
+          <View style={[
+            styles.reactionPickerContainer,
+            {
+              position: 'absolute',
+              top: Math.max(50, reactionPicker.position.y - 80), // Position above the touch point with min top margin
+              left: (Dimensions.get('window').width - 320) / 2, // Center horizontally on screen
+              right: (Dimensions.get('window').width - 320) / 2, // Center horizontally on screen
+            }
+          ]}>
+            {reactions.map((reaction) => (
+              <TouchableOpacity
+                key={reaction.type}
+                style={styles.reactionButton}
+                onPress={() => sendReaction(reactionPicker.messageGuid, reaction.type)}
+              >
+                <Text style={styles.reactionButtonEmoji}>{reaction.emoji}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
     );
   };
 
@@ -588,6 +693,7 @@ function MessageView({ selectedThread, messages, onSendMessage, onBackPress, err
       </View>
       
       {renderFullscreenImageModal()}
+      {renderReactionPicker()}
     </View>
   );
 }
@@ -919,6 +1025,37 @@ const styles = StyleSheet.create({
   emptyStateText: {
     fontSize: 16,
     color: '#666',
+  },
+  // Reaction picker styles
+  reactionPickerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+  },
+  reactionPickerContainer: {
+    backgroundColor: 'white',
+    borderRadius: 25,
+    flexDirection: 'row',
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  reactionButton: {
+    width: 45,
+    height: 45,
+    borderRadius: 22.5,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginHorizontal: 4,
+  },
+  reactionButtonEmoji: {
+    fontSize: 24,
   },
 });
 

@@ -14,6 +14,7 @@ import ChatList from './components/ChatList';
 import MessageView from './components/MessageView';
 import Settings from './components/Settings';
 import apiClient from './services/apiClient';
+import messageService from './services/messageService';
 import { mockThreads, mockMessages } from './mockData';
 import { storage } from './utils/storage';
 
@@ -50,11 +51,11 @@ function AppContent() {
     loadSavedData();
   }, []);
 
-  const fetchThreads = useCallback(async () => {
+  const fetchThreads = useCallback(async (forceRefresh = false) => {
     try {
       setError(null);
-      const data = await apiClient.getThreads();
-      const filteredThreads = (data.threads || [])
+      const threadsData = await messageService.getThreads(forceRefresh);
+      const filteredThreads = (threadsData || [])
         .filter(thread => !deletedThreads.includes(thread.thread_guid))
         .sort((a, b) => new Date(b.last_updated) - new Date(a.last_updated));
       setThreads(filteredThreads);
@@ -76,15 +77,15 @@ function AppContent() {
     }
   }, [deletedThreads, threads.length]);
 
-  const fetchMessages = useCallback(async (threadGuid) => {
+  const fetchMessages = useCallback(async (threadGuid, forceRefresh = false) => {
     console.log('fetchMessages called with threadGuid:', threadGuid);
     setMessagesLoading(true);
     try {
       setError(null);
       console.log('Making API call to get messages...');
-      const data = await apiClient.getMessages(threadGuid);
-      console.log('API response received:', data);
-      setMessages(data.messages || []);
+      const messagesData = await messageService.getThreadMessages(threadGuid, forceRefresh);
+      console.log('API response received:', messagesData);
+      setMessages(messagesData || []);
       setIsOnline(true);
     } catch (err) {
       console.error('Failed to fetch messages:', err);
@@ -129,6 +130,15 @@ function AppContent() {
     fetchThreads();
   }, [serverUrl, fetchThreads]);
 
+  // Start message service polling when app starts
+  useEffect(() => {
+    messageService.startPolling();
+    return () => {
+      messageService.stopPolling();
+    };
+  }, []);
+
+  // Legacy polling - can be removed once message service polling is fully tested
   useEffect(() => {
     const pollInterval = setInterval(checkForNewMessages, 5000);
     return () => clearInterval(pollInterval);
@@ -173,18 +183,44 @@ function AppContent() {
     console.log('Sending message:', messageData);
     console.log('Selected thread:', selectedThread);
 
+    // Create optimistic message for immediate UI update
+    const optimisticMessage = {
+      guid: `temp-${Date.now()}`, // Temporary ID
+      text: messageData.text || '',
+      timestamp: new Date().toISOString(),
+      sender_name: 'You',
+      direction: 'outgoing',
+      thread_guid: selectedThread.thread_guid,
+      attachments: messageData.attachment ? [{ 
+        attachment_url: messageData.attachment,
+        mime_type: 'image/jpeg' 
+      }] : []
+    };
+
+    // Add optimistic message to UI immediately
+    setMessages(prevMessages => [...prevMessages, optimisticMessage]);
+    
+    // Add to cache optimistically
+    await messageService.addMessageToCache(selectedThread.thread_guid, optimisticMessage);
+
     try {
       setError(null);
       await apiClient.sendMessage(selectedThread.thread_guid, messageData);
       
       console.log('Message sent successfully, refreshing...');
-      await fetchMessages(selectedThread.thread_guid);
-      await fetchThreads();
+      // Force refresh to get the real message with actual GUID
+      await fetchMessages(selectedThread.thread_guid, true);
+      await fetchThreads(true);
       
       setIsOnline(true);
     } catch (err) {
       console.error('Failed to send message:', err);
       setError(`Failed to send message: ${err.message}`);
+      
+      // Remove optimistic message on failure
+      setMessages(prevMessages => 
+        prevMessages.filter(msg => msg.guid !== optimisticMessage.guid)
+      );
     }
   };
 
@@ -218,6 +254,26 @@ function AppContent() {
     setDeletedThreads([]);
     await storage.setItem('winiMessage_deletedThreads', []);
     fetchThreads();
+  };
+
+  const handleLoadOlderMessages = async () => {
+    if (!selectedThread) return;
+    
+    try {
+      setError(null);
+      const olderMessages = await messageService.loadOlderMessages(selectedThread.thread_guid);
+      
+      if (olderMessages.length > 0) {
+        // Prepend older messages to current messages
+        setMessages(prevMessages => [...olderMessages, ...prevMessages]);
+      }
+      
+      return olderMessages.length > 0;
+    } catch (err) {
+      console.error('Failed to load older messages:', err);
+      setError('Failed to load older messages');
+      return false;
+    }
   };
 
   if (loading) {
@@ -261,6 +317,7 @@ function AppContent() {
             messages={messages}
             onSendMessage={handleSendMessage}
             onBackPress={handleBackToThreads}
+            onLoadOlderMessages={handleLoadOlderMessages}
             error={error && isOnline ? error : null}
             loading={messagesLoading}
           />
