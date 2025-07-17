@@ -227,7 +227,8 @@ function MessageView({ selectedThread, messages, onSendMessage, onBackPress, err
         {showSender && (
           <Text style={[
             styles.senderName,
-            isOutgoing && styles.senderNameOutgoing
+            isOutgoing && styles.senderNameOutgoing,
+            hasReactions && styles.senderNameWithReactions
           ]}>
             {message.sender_name}
           </Text>
@@ -236,10 +237,7 @@ function MessageView({ selectedThread, messages, onSendMessage, onBackPress, err
           styles.messageGroup,
           isOutgoing && styles.messageGroupOutgoing
         ]}>
-          <View style={[
-            styles.messageBubbleContainer,
-            hasReactions && styles.messageBubbleWithReactions
-          ]}>
+          <View style={styles.messageBubbleContainer}>
             {isImageOnly ? (
               // Render image-only messages without bubble
               <View style={[
@@ -326,7 +324,8 @@ function MessageView({ selectedThread, messages, onSendMessage, onBackPress, err
               // Render regular messages with bubble
               <View style={[
                 styles.messageBubble,
-                isOutgoing ? styles.messageBubbleOutgoing : styles.messageBubbleIncoming
+                isOutgoing ? styles.messageBubbleOutgoing : styles.messageBubbleIncoming,
+                hasReactions && styles.messageBubbleWithReactions
               ]}>
                 {message.text && (
                   <Text style={[
@@ -418,7 +417,6 @@ function MessageView({ selectedThread, messages, onSendMessage, onBackPress, err
                 isOutgoing={isOutgoing}
                 onReactionClick={(reaction) => {
                   console.log('Reaction clicked:', reaction);
-                  // Future: Could implement reaction details or actions
                 }}
               />
             )}
@@ -673,13 +671,16 @@ const styles = StyleSheet.create({
   senderName: {
     fontSize: 11,
     color: '#666',
-    marginBottom: 4,
     marginLeft: 0,
+    marginBottom: 4,
   },
   senderNameOutgoing: {
     textAlign: 'right',
     marginLeft: 'auto',
     marginRight: 0,
+  },
+  senderNameWithReactions: {
+    marginBottom: 8, // Compensate for reaction space above bubble
   },
   messageGroup: {
     alignSelf: 'flex-start',
@@ -704,8 +705,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   messageBubbleWithReactions: {
-    marginTop: 16,
-    marginBottom: 8,
+    marginTop: 12, // Reduced from 16 to keep closer to sender name
   },
   messageText: {
     fontSize: 14,
@@ -812,8 +812,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   imageOnlyWithReactions: {
-    marginTop: 16,
-    marginBottom: 8,
+    marginTop: 12, // Reduced from 16 to keep closer to sender name
   },
   imageOnlyTouchable: {
     position: 'relative',
