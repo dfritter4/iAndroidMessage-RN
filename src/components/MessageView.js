@@ -236,7 +236,10 @@ function MessageView({ selectedThread, messages, onSendMessage, onBackPress, err
           styles.messageGroup,
           isOutgoing && styles.messageGroupOutgoing
         ]}>
-          <View style={styles.messageBubbleContainer}>
+          <View style={[
+            styles.messageBubbleContainer,
+            hasReactions && styles.messageBubbleWithReactions
+          ]}>
             {isImageOnly ? (
               // Render image-only messages without bubble
               <View style={[
@@ -323,8 +326,7 @@ function MessageView({ selectedThread, messages, onSendMessage, onBackPress, err
               // Render regular messages with bubble
               <View style={[
                 styles.messageBubble,
-                isOutgoing ? styles.messageBubbleOutgoing : styles.messageBubbleIncoming,
-                hasReactions && styles.messageBubbleWithReactions
+                isOutgoing ? styles.messageBubbleOutgoing : styles.messageBubbleIncoming
               ]}>
                 {message.text && (
                   <Text style={[
